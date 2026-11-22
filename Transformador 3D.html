@@ -1,0 +1,626 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Transformador 3D</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@500;600;700&display=swap">
+<style>
+/* Layout: palco 3D à esquerda, painel de leitura (osciloscópio + tabela de enrolamentos) à direita, passos de funcionamento por baixo. Cobre = primário, azul-turquesa e restantes = secundários. */
+:root {
+  --bg: #0e1319;
+  --panel: #151c24;
+  --line: #26313d;
+  --fg: #e6ebf0;
+  --muted: #98a6b4;
+  --cu: #e08a45;
+  --cy: #45bdd1;
+  --flux: #9db8ff;
+  --display: 'Space Grotesk', system-ui, sans-serif;
+  --body: 'Inter', system-ui, sans-serif;
+  --mono: 'JetBrains Mono', ui-monospace, monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--body);
+  font-size: 15px;
+  line-height: 1.55;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 24px 48px;
+}
+.wrap { max-width: 1180px; margin: 0 auto; display: flex; flex-direction: column; gap: 22px; }
+.kicker { font-family: var(--mono); font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--cu); margin: 0 0 6px; }
+h1 { font-family: var(--display); font-weight: 700; font-size: clamp(28px, 5vw, 42px); line-height: 1.08; letter-spacing: -.01em; margin: 0 0 10px; text-wrap: balance; }
+.lede { margin: 0; max-width: 62ch; color: var(--muted); }
+h2 { font-family: var(--display); font-weight: 600; font-size: 15px; letter-spacing: .02em; margin: 0 0 10px; }
+
+.tabs { display: flex; flex-wrap: wrap; gap: 8px; }
+.tabs button {
+  font: 500 14px var(--body); color: var(--muted); background: transparent;
+  border: 1px solid var(--line); border-radius: 6px; padding: 9px 14px; cursor: pointer;
+}
+.tabs button:hover { color: var(--fg); border-color: #3a4756; }
+.tabs button[aria-selected="true"] { color: var(--fg); background: var(--panel); border-color: var(--cu); }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--flux); outline-offset: 2px; }
+
+.grid { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 20px; align-items: start; }
+.stage-col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.stage {
+  position: relative; width: 100%; aspect-ratio: 4 / 3; min-height: 340px;
+  background: radial-gradient(ellipse at 50% 35%, #1a2431 0%, #0f151c 70%);
+  border: 1px solid var(--line); border-radius: 8px; overflow: hidden;
+}
+.stage canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+.stage canvas:active { cursor: grabbing; }
+.hint { position: absolute; left: 12px; bottom: 8px; margin: 0; font-size: 12px; color: var(--muted); pointer-events: none; max-width: 80%; }
+.fallback { position: absolute; inset: 0; display: grid; place-items: center; padding: 24px; text-align: center; color: var(--muted); }
+
+.labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+.lbl { position: absolute; left: 0; top: 0; display: flex; align-items: center; will-change: left, top; }
+.lbl .chip {
+  background: rgba(14, 19, 25, .86); border: 1px solid var(--line); border-left: 3px solid var(--c);
+  border-radius: 4px; padding: 3px 8px; font-size: 12px; line-height: 1.3; white-space: nowrap;
+  display: flex; flex-direction: column;
+}
+.lbl .chip b { font-weight: 600; }
+.lbl .sub { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+.lbl .stem { background: var(--muted); display: block; }
+.lbl .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--fg); display: block; flex: none; }
+.lbl.up { flex-direction: column; transform: translate(-50%, calc(-100% + 3px)); }
+.lbl.up .stem { width: 1px; height: 16px; }
+.lbl.right { flex-direction: row-reverse; transform: translate(-3px, -50%); }
+.lbl.right .stem { height: 1px; width: 14px; }
+.lbl.left { flex-direction: row; transform: translate(calc(-100% + 3px), -50%); }
+.lbl.left .stem { height: 1px; width: 14px; }
+.lbl.right .dot { order: 0; }
+.lbl.hide { display: none; }
+
+.controls { display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; }
+.controls button#btnPlay {
+  font: 500 13px var(--body); color: var(--fg); background: var(--panel); border: 1px solid var(--line);
+  border-radius: 6px; padding: 7px 12px; cursor: pointer; min-width: 92px;
+}
+.chk, .rng { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; color: var(--muted); }
+.chk input { accent-color: var(--cu); width: 16px; height: 16px; margin: 0; }
+.rng input { accent-color: var(--cu); width: 120px; }
+.rng output { font-family: var(--mono); color: var(--fg); min-width: 5.5ch; }
+.vs-rng input { accent-color: var(--cy); width: 160px; }
+
+.side { display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px; min-width: 0; }
+#scope { display: block; width: 100%; height: 150px; }
+.note { margin: 8px 0 0; font-size: 12.5px; color: var(--muted); }
+.table-wrap { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th { text-align: left; font-weight: 500; color: var(--muted); font-size: 11.5px; letter-spacing: .04em; text-transform: uppercase; padding: 0 8px 6px 0; white-space: nowrap; }
+td { padding: 6px 8px 6px 0; border-top: 1px solid var(--line); font-family: var(--mono); font-size: 12.5px; white-space: nowrap; }
+td:first-child { font-family: var(--body); }
+.sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 8px; vertical-align: -1px; }
+#summary { margin: 10px 0 0; font-size: 13px; }
+#summary b { font-family: var(--mono); font-weight: 500; }
+
+.steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 24px; }
+.step { border-top: 1px solid var(--line); padding-top: 12px; min-width: 0; }
+.step .n { font-family: var(--mono); font-size: 12px; color: var(--cu); }
+.step h3 { font-family: var(--display); font-size: 16px; margin: 2px 0 6px; }
+.step p { margin: 0; color: var(--muted); font-size: 14px; }
+.formula { font-family: var(--mono); color: var(--fg); }
+.modenote { margin: 0; max-width: 78ch; color: var(--muted); font-size: 14px; }
+
+@media (max-width: 900px) {
+  .grid { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 560px) {
+  .lbl .sub { display: none; }
+  .rng input, .vs-rng input { width: 100px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { scroll-behavior: auto !important; }
+}
+</style>
+
+<div class="wrap">
+  <header>
+    <p class="kicker">Máquinas elétricas</p>
+    <h1>Transformador monofásico</h1>
+    <p class="lede">Núcleo, enrolamento primário e enrolamento secundário em funcionamento. Arrasta para rodar a vista e muda a tensão do secundário para ver como o número de espiras decide a tensão de saída.</p>
+  </header>
+
+  <div class="tabs" role="tablist" aria-label="Modelo">
+    <button role="tab" id="tab1" aria-selected="true">1 · Primário e secundário</button>
+    <button role="tab" id="tab2" aria-selected="false">2 · Vários secundários</button>
+  </div>
+
+  <div class="grid">
+    <section class="stage-col" aria-label="Modelo 3D">
+      <div class="stage" id="stage">
+        <canvas id="gl" aria-label="Animação 3D de um transformador"></canvas>
+        <div class="labels" id="labels"></div>
+        <p class="hint">Arrasta para rodar · roda do rato ou pinça para ampliar</p>
+      </div>
+      <div class="controls">
+        <button id="btnPlay" type="button">Pausar</button>
+        <label class="chk" for="chkExplode"><input type="checkbox" id="chkExplode"> Vista afastada</label>
+        <label class="chk" for="chkLabels"><input type="checkbox" id="chkLabels" checked> Etiquetas</label>
+        <label class="chk" for="chkFlux"><input type="checkbox" id="chkFlux" checked> Fluxo magnético</label>
+        <label class="chk" for="chkAuto"><input type="checkbox" id="chkAuto" checked> Vista automática</label>
+        <label class="rng" for="spd">Velocidade <input type="range" id="spd" min="0.2" max="2" step="0.1" value="1"></label>
+        <label class="rng vs-rng" for="vs" id="vsWrap">Tensão do secundário <input type="range" id="vs" min="6" max="300" step="1" value="24"> <output id="vsOut" for="vs">24 V</output></label>
+      </div>
+      <p class="modenote" id="modeNote"></p>
+    </section>
+
+    <aside class="side">
+      <div class="panel">
+        <h2>Tensões ao longo do tempo</h2>
+        <canvas id="scope" aria-label="Formas de onda das tensões"></canvas>
+        <p class="note">Escala real em volts (valor de pico). A linha tracejada é o fluxo Φ, atrasado 90° em relação às tensões.</p>
+      </div>
+      <div class="panel">
+        <h2>Enrolamentos</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Enrolamento</th><th>Tensão</th><th>Espiras</th><th>V₁ / V</th></tr></thead>
+            <tbody id="rows"></tbody>
+          </table>
+        </div>
+        <p id="summary"></p>
+        <p class="note">Valores ilustrativos de 4 espiras por volt. Na animação desenha-se 1 espira por cada 24 reais e o ciclo é abrandado; na rede real são 50 ciclos por segundo.</p>
+      </div>
+    </aside>
+  </div>
+
+  <section class="steps" aria-label="Como funciona">
+    <div class="step">
+      <span class="n">1</span>
+      <h3>Corrente no primário</h3>
+      <p>Ligado à rede de 230 V alternada, o enrolamento primário é percorrido por uma corrente que inverte de sentido 50 vezes por segundo.</p>
+    </div>
+    <div class="step">
+      <span class="n">2</span>
+      <h3>Fluxo no núcleo</h3>
+      <p>Essa corrente cria um fluxo magnético variável. O núcleo de chapas de ferro isoladas conduz o fluxo até ao secundário e reduz as perdas por correntes de Foucault.</p>
+    </div>
+    <div class="step">
+      <span class="n">3</span>
+      <h3>Tensão induzida no secundário</h3>
+      <p>O mesmo fluxo atravessa o secundário e, pela lei de Faraday, induz uma tensão proporcional ao número de espiras: <span class="formula">V₂ / V₁ = N₂ / N₁</span>. A corrente no secundário circula em sentido oposto à do primário.</p>
+    </div>
+  </section>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(function () {
+  var T = window.THREE;
+  var TAU = Math.PI * 2;
+  var VP = 230, TPV = 4, REAL_PER_DRAWN = 24;
+  var PITCH = 0.07, COIL_R = 0.54, TUBE_R = 0.03, LEG_X = 1.9;
+  var COL = { cu: 0xe08a45, cy: 0x45bdd1, mint: 0x6fd3a5, peri: 0x8aa4ff, pink: 0xd46fb0 };
+  var CSS = { cu: '#e08a45', cy: '#45bdd1', mint: '#6fd3a5', peri: '#8aa4ff', pink: '#d46fb0' };
+
+  var $ = function (id) { return document.getElementById(id); };
+  var stage = $('stage'), canvas = $('gl'), labelsEl = $('labels'), scopeEl = $('scope');
+  var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  var state = { mode: 1, vs: 24, ex: 0, exTarget: 0, speed: 1, labels: true, flux: true, auto: !reduce, paused: reduce };
+  var tt = 0.5;
+  var fmt = function (n, d) { return n.toLocaleString('pt-PT', { maximumFractionDigits: d === undefined ? 1 : d }); };
+  var drawn = function (v) { return Math.max(2, Math.round(v * TPV / REAL_PER_DRAWN)); };
+
+  var renderer;
+  try {
+    renderer = new T.WebGLRenderer({ canvas: canvas, antialias: true, alpha: true });
+  } catch (err) {
+    var fb = document.createElement('div');
+    fb.className = 'fallback';
+    fb.textContent = 'Este navegador não consegue mostrar gráficos 3D (WebGL). Experimenta abrir a página noutro navegador.';
+    stage.appendChild(fb);
+    return;
+  }
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+
+  var scene = new T.Scene();
+  var camera = new T.PerspectiveCamera(40, 4 / 3, 0.1, 100);
+
+  scene.add(new T.HemisphereLight(0xcfe0ff, 0x1a1f27, 0.75));
+  var sun = new T.DirectionalLight(0xffffff, 0.95);
+  sun.position.set(5, 8, 7);
+  scene.add(sun);
+  var rim = new T.DirectionalLight(0x6a8cff, 0.35);
+  rim.position.set(-6, 3, -6);
+  scene.add(rim);
+
+  var grid = new T.GridHelper(18, 18, 0x2b3744, 0x1b242e);
+  grid.position.y = -3.05;
+  grid.material.transparent = true;
+  grid.material.opacity = 0.7;
+  scene.add(grid);
+
+  // dot sprite
+  var dc = document.createElement('canvas');
+  dc.width = dc.height = 64;
+  var dx = dc.getContext('2d');
+  var gr = dx.createRadialGradient(32, 32, 0, 32, 32, 32);
+  gr.addColorStop(0, 'rgba(255,255,255,1)');
+  gr.addColorStop(0.35, 'rgba(255,255,255,.75)');
+  gr.addColorStop(1, 'rgba(255,255,255,0)');
+  dx.fillStyle = gr;
+  dx.fillRect(0, 0, 64, 64);
+  var dotTex = new T.CanvasTexture(dc);
+
+  // laminated core: stacked thin sheets
+  (function buildCore() {
+    var shape = new T.Shape();
+    shape.moveTo(-2.25, -2.8); shape.lineTo(2.25, -2.8); shape.lineTo(2.25, 2.8); shape.lineTo(-2.25, 2.8); shape.lineTo(-2.25, -2.8);
+    var hole = new T.Path();
+    hole.moveTo(-1.55, -2.1); hole.lineTo(-1.55, 2.1); hole.lineTo(1.55, 2.1); hole.lineTo(1.55, -2.1); hole.lineTo(-1.55, -2.1);
+    shape.holes.push(hole);
+    var geo = new T.ExtrudeGeometry(shape, { depth: 0.044, bevelEnabled: false });
+    var mA = new T.MeshStandardMaterial({ color: 0x8c97a4, metalness: 0.5, roughness: 0.5 });
+    var mB = new T.MeshStandardMaterial({ color: 0x768291, metalness: 0.5, roughness: 0.55 });
+    for (var i = 0; i < 14; i++) {
+      var m = new T.Mesh(geo, i % 2 ? mA : mB);
+      m.position.z = -0.35 + i * 0.05;
+      scene.add(m);
+    }
+  })();
+
+  // magnetic flux particles around the core
+  var FLUX_N = 64;
+  var PATH = [[-LEG_X, -2.45], [LEG_X, -2.45], [LEG_X, 2.45], [-LEG_X, 2.45]];
+  var PLEN = 3.8 + 4.9 + 3.8 + 4.9;
+  function fluxPos(f, out, i, z) {
+    var d = ((f % 1) + 1) % 1 * PLEN, x, y;
+    if (d < 3.8) { x = -LEG_X + d; y = -2.45; }
+    else if (d < 8.7) { x = LEG_X; y = -2.45 + (d - 3.8); }
+    else if (d < 12.5) { x = LEG_X - (d - 8.7); y = 2.45; }
+    else { x = -LEG_X; y = 2.45 - (d - 12.5); }
+    out[i * 3] = x; out[i * 3 + 1] = y; out[i * 3 + 2] = z;
+  }
+  function makeFlux(z) {
+    var g = new T.BufferGeometry();
+    var arr = new Float32Array(FLUX_N * 3);
+    g.setAttribute('position', new T.BufferAttribute(arr, 3));
+    var m = new T.PointsMaterial({ size: 0.24, map: dotTex, color: 0x9db8ff, transparent: true, depthWrite: false, blending: T.AdditiveBlending });
+    var p = new T.Points(g, m);
+    p.frustumCulled = false;
+    scene.add(p);
+    return { p: p, arr: arr, m: m, z: z };
+  }
+  var fluxSets = [makeFlux(0.37), makeFlux(-0.37)];
+  var fs = 0;
+
+  // coils
+  var coils = [];
+  var labels = [];
+
+  function makeCoil(o) {
+    var g = new T.Group();
+    var seg = 24, n = o.turns * seg, pts = [];
+    for (var i = 0; i <= n; i++) {
+      var u = i / n, a = u * o.turns * TAU;
+      pts.push(new T.Vector3(COIL_R * Math.cos(a), o.y0 + u * o.turns * PITCH, COIL_R * Math.sin(a)));
+    }
+    var geo = new T.TubeGeometry(new T.CatmullRomCurve3(pts), n, TUBE_R, 6, false);
+    var mat = new T.MeshStandardMaterial({ color: COL[o.c], metalness: 0.7, roughness: 0.32, emissive: COL[o.c], emissiveIntensity: 0.2 });
+    g.add(new T.Mesh(geo, mat));
+    var cnt = Math.min(260, Math.max(8, o.turns * 4));
+    var pg = new T.BufferGeometry();
+    var arr = new Float32Array(cnt * 3);
+    pg.setAttribute('position', new T.BufferAttribute(arr, 3));
+    var pm = new T.PointsMaterial({ size: 0.14, map: dotTex, color: new T.Color(COL[o.c]).lerp(new T.Color(0xffffff), 0.55), transparent: true, depthWrite: false, blending: T.AdditiveBlending });
+    var pts3 = new T.Points(pg, pm);
+    pts3.frustumCulled = false;
+    g.add(pts3);
+    g.position.x = o.x;
+    scene.add(g);
+    return { o: o, g: g, geo: geo, mat: mat, pg: pg, pm: pm, arr: arr, cnt: cnt, s: 0, mid: o.y0 + o.turns * PITCH / 2, base: o.x, dir: o.x < 0 ? -1 : 1 };
+  }
+
+  function updCoil(c, cur, dte) {
+    var o = c.o;
+    c.s += o.sign * cur * dte * 1.6 / o.turns;
+    for (var i = 0; i < c.cnt; i++) {
+      var u = (((i / c.cnt + c.s) % 1) + 1) % 1;
+      var a = u * o.turns * TAU;
+      c.arr[i * 3] = COIL_R * Math.cos(a);
+      c.arr[i * 3 + 1] = o.y0 + u * o.turns * PITCH;
+      c.arr[i * 3 + 2] = COIL_R * Math.sin(a);
+    }
+    c.pg.attributes.position.needsUpdate = true;
+    c.mat.emissiveIntensity = 0.12 + 0.85 * Math.abs(cur);
+    c.pm.opacity = 0.35 + 0.65 * Math.abs(cur);
+  }
+
+  function addLabel(text, sub, kind, colorKey, anchorFn) {
+    var el = document.createElement('div');
+    el.className = 'lbl ' + kind;
+    var color = colorKey ? CSS[colorKey] : '#98a6b4';
+    el.innerHTML = '<span class="chip" style="--c:' + color + '"><b>' + text + '</b>' + (sub ? '<span class="sub">' + sub + '</span>' : '') + '</span><i class="stem"></i><i class="dot"></i>';
+    labelsEl.appendChild(el);
+    labels.push({ el: el, anchor: anchorFn, kind: kind });
+  }
+
+  function secList() {
+    if (state.mode === 1) return [{ v: state.vs, c: 'cy', name: 'Secundário' }];
+    return [
+      { v: 110, c: 'pink', name: 'S4' },
+      { v: 48, c: 'peri', name: 'S3' },
+      { v: 24, c: 'cy', name: 'S2' },
+      { v: 12, c: 'mint', name: 'S1' }
+    ]; // de baixo para cima
+  }
+
+  function clearScene() {
+    coils.forEach(function (c) {
+      scene.remove(c.g);
+      c.geo.dispose(); c.mat.dispose(); c.pg.dispose(); c.pm.dispose();
+    });
+    coils = [];
+    labels = [];
+    labelsEl.innerHTML = '';
+  }
+
+  function rebuild() {
+    clearScene();
+    var np = drawn(VP);
+    var prim = makeCoil({ turns: np, c: 'cu', x: -LEG_X, y0: -np * PITCH / 2, sign: 1 });
+    coils.push(prim);
+
+    var secs = secList();
+    var gap = 0.3, total = 0;
+    secs.forEach(function (s) { s.turns = drawn(s.v); total += s.turns * PITCH; });
+    total += gap * (secs.length - 1);
+    var y = -total / 2;
+    var made = [];
+    secs.forEach(function (s) {
+      var c = makeCoil({ turns: s.turns, c: s.c, x: LEG_X, y0: y, sign: -1 });
+      c.sec = s;
+      coils.push(c);
+      made.push(c);
+      y += s.turns * PITCH + gap;
+    });
+
+    addLabel('Núcleo de chapas de ferro', 'conduz o fluxo', 'up', null, function () { return new T.Vector3(0, 2.8, 0.35); });
+    addLabel('Fluxo magnético Φ', 'muda de sentido com a corrente', 'up', null, function () { return new T.Vector3(0, -2.45, 0.4); });
+    addLabel('Enrolamento primário', 'N₁ ≈ ' + fmt(VP * TPV, 0) + ' espiras · ' + VP + ' V', 'left', 'cu', function () {
+      return new T.Vector3(prim.g.position.x - COIL_R - 0.04, prim.mid, 0);
+    });
+    made.forEach(function (c) {
+      var nm = state.mode === 1 ? 'Enrolamento secundário' : 'Secundário ' + c.sec.name;
+      var sub = (state.mode === 1 ? 'N₂ ≈ ' : '') + fmt(c.sec.v * TPV, 0) + ' espiras · ' + fmt(c.sec.v, 0) + ' V';
+      addLabel(nm, sub, 'right', c.sec.c, function () {
+        return new T.Vector3(c.g.position.x + COIL_R + 0.04, c.mid, 0);
+      });
+    });
+    applyLabelVisibility();
+    updateTable();
+  }
+
+  function applyLabelVisibility() {
+    labels.forEach(function (l) { l.el.classList.toggle('hide', !state.labels); });
+  }
+
+  function updateTable() {
+    var secs = secList().slice().sort(function (a, b) { return a.v - b.v; });
+    var html = '<tr><td><span class="sw" style="background:' + CSS.cu + '"></span>Primário</td><td>' + VP + ' V</td><td>' + fmt(VP * TPV, 0) + '</td><td>—</td></tr>';
+    secs.forEach(function (s) {
+      html += '<tr><td><span class="sw" style="background:' + CSS[s.c] + '"></span>' + s.name + '</td><td>' + fmt(s.v, 0) + ' V</td><td>' + fmt(s.v * TPV, 0) + '</td><td>' + fmt(VP / s.v, 2) + '</td></tr>';
+    });
+    $('rows').innerHTML = html;
+    var sum = $('summary');
+    if (state.mode === 1) {
+      var v = state.vs;
+      var kind = v < VP ? 'redutor' : (v > VP ? 'elevador' : 'de isolamento');
+      sum.innerHTML = 'Transformador <b>' + kind + '</b>, relação de transformação <b>' + fmt(VP / v, 2) + ' : 1</b>.';
+    } else {
+      sum.innerHTML = 'Um primário, <b>4</b> secundários, o mesmo fluxo no núcleo.';
+    }
+    $('modeNote').textContent = state.mode === 1
+      ? 'Aumenta ou diminui a tensão do secundário e observa o número de espiras desenhadas. Com menos espiras que o primário o transformador é redutor, com mais espiras é elevador.'
+      : 'Um único primário alimenta quatro secundários no mesmo núcleo. Todos veem o mesmo fluxo, por isso a tensão de cada um é proporcional ao seu número de espiras: 12 V, 24 V, 48 V e 110 V.';
+  }
+
+  // camera
+  var cam = { theta: 0.5, phi: 1.2, zoom: 1, baseR: 13 };
+  var W = 800, H = 600, clock = 0;
+  function resize() {
+    W = stage.clientWidth; H = stage.clientHeight;
+    renderer.setSize(W, H, false);
+    camera.aspect = W / H;
+    camera.updateProjectionMatrix();
+    cam.baseR = (W / H) < 1.3 ? 13 * 1.3 / (W / H) : 13;
+    sizeScope();
+  }
+  function placeCamera() {
+    var th = cam.theta + (state.auto ? 0.4 * Math.sin(clock * 0.35) : 0);
+    var r = cam.baseR * cam.zoom;
+    camera.position.set(r * Math.sin(cam.phi) * Math.sin(th), r * Math.cos(cam.phi), r * Math.sin(cam.phi) * Math.cos(th));
+    camera.lookAt(0, 0, 0);
+  }
+  function stopAuto() {
+    if (state.auto) { state.auto = false; $('chkAuto').checked = false; }
+  }
+  var ptrs = new Map(), lastDist = 0;
+  canvas.addEventListener('pointerdown', function (e) {
+    try { canvas.setPointerCapture(e.pointerId); } catch (x) {}
+    ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    lastDist = 0;
+    if (state.auto) {
+      cam.theta += 0.4 * Math.sin(clock * 0.35);
+      stopAuto();
+    }
+  });
+  canvas.addEventListener('pointermove', function (e) {
+    var p = ptrs.get(e.pointerId);
+    if (!p) return;
+    var ddx = e.clientX - p.x, ddy = e.clientY - p.y;
+    p.x = e.clientX; p.y = e.clientY;
+    if (ptrs.size === 1) {
+      cam.theta -= ddx * 0.008;
+      cam.phi = Math.max(0.25, Math.min(1.75, cam.phi - ddy * 0.008));
+    } else if (ptrs.size === 2) {
+      var it = ptrs.values(), a = it.next().value, b = it.next().value;
+      var d = Math.hypot(a.x - b.x, a.y - b.y);
+      if (lastDist) cam.zoom = Math.max(0.55, Math.min(1.6, cam.zoom * lastDist / d));
+      lastDist = d;
+    }
+  });
+  function endPtr(e) { ptrs.delete(e.pointerId); lastDist = 0; }
+  canvas.addEventListener('pointerup', endPtr);
+  canvas.addEventListener('pointercancel', endPtr);
+  canvas.addEventListener('wheel', function (e) {
+    e.preventDefault();
+    cam.zoom = Math.max(0.55, Math.min(1.6, cam.zoom * Math.exp(e.deltaY * 0.001)));
+  }, { passive: false });
+
+  // oscilloscope
+  var sctx = scopeEl.getContext('2d');
+  var sW = 300, sH = 150;
+  function sizeScope() {
+    var dpr = Math.min(window.devicePixelRatio || 1, 2);
+    sW = scopeEl.clientWidth; sH = scopeEl.clientHeight;
+    scopeEl.width = Math.round(sW * dpr);
+    scopeEl.height = Math.round(sH * dpr);
+    sctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  function drawScope(phase) {
+    var secs = secList();
+    var peaks = [VP * Math.SQRT2].concat(secs.map(function (s) { return s.v * Math.SQRT2; }));
+    var M = Math.max.apply(null, peaks) * 1.1;
+    var pad = 8, mid = sH / 2, half = mid - pad;
+    sctx.clearRect(0, 0, sW, sH);
+    sctx.lineWidth = 1;
+    sctx.strokeStyle = '#26313d';
+    sctx.beginPath();
+    for (var q = 0; q <= 4; q++) { var gx = Math.round(q * sW / 4) + 0.5; sctx.moveTo(gx, 0); sctx.lineTo(gx, sH); }
+    sctx.moveTo(0, mid + 0.5); sctx.lineTo(sW, mid + 0.5);
+    sctx.stroke();
+    function trace(amp, color, dash, width) {
+      sctx.beginPath();
+      sctx.setLineDash(dash || []);
+      sctx.lineWidth = width || 2;
+      sctx.strokeStyle = color;
+      for (var x = 0; x <= sW; x += 2) {
+        var ph = x / sW * 2 * TAU;
+        var yy = mid - Math.cos(ph) * amp / M * half;
+        if (x === 0) sctx.moveTo(x, yy); else sctx.lineTo(x, yy);
+      }
+      sctx.stroke();
+      sctx.setLineDash([]);
+    }
+    // flux (sin) dashed
+    sctx.beginPath();
+    sctx.setLineDash([4, 4]);
+    sctx.lineWidth = 1.5;
+    sctx.strokeStyle = '#9db8ff';
+    for (var x = 0; x <= sW; x += 2) {
+      var yf = mid - Math.sin(x / sW * 2 * TAU) * 0.8 * half;
+      if (x === 0) sctx.moveTo(x, yf); else sctx.lineTo(x, yf);
+    }
+    sctx.stroke();
+    sctx.setLineDash([]);
+    secs.forEach(function (s) { trace(s.v * Math.SQRT2, CSS[s.c], null, 2); });
+    trace(VP * Math.SQRT2, CSS.cu, null, 2);
+    // cursor
+    var cx = ((phase % (2 * TAU)) / (2 * TAU)) * sW;
+    sctx.strokeStyle = 'rgba(230,235,240,.35)';
+    sctx.lineWidth = 1;
+    sctx.beginPath(); sctx.moveTo(cx, 0); sctx.lineTo(cx, sH); sctx.stroke();
+    var ph0 = (cx / sW) * 2 * TAU;
+    function dot(v, color) {
+      sctx.fillStyle = color;
+      sctx.beginPath(); sctx.arc(cx, mid - Math.cos(ph0) * v / M * half, 3.5, 0, TAU); sctx.fill();
+    }
+    secs.forEach(function (s) { dot(s.v * Math.SQRT2, CSS[s.c]); });
+    dot(VP * Math.SQRT2, CSS.cu);
+    sctx.fillStyle = '#98a6b4';
+    sctx.font = '11px JetBrains Mono, monospace';
+    sctx.fillText('+' + Math.round(M / 1.1) + ' V', 4, 12);
+    sctx.fillText('−' + Math.round(M / 1.1) + ' V', 4, sH - 4);
+  }
+
+  // main loop
+  var last = performance.now();
+  var vtmp = new T.Vector3();
+  function frame(now) {
+    var dt = Math.min(0.05, (now - last) / 1000);
+    last = now;
+    clock += dt;
+    var dte = state.paused ? 0 : dt * state.speed;
+    tt += dte;
+    var phase = TAU * 0.5 * tt;
+    var phi = Math.sin(phase);
+
+    state.ex += (state.exTarget - state.ex) * Math.min(1, dt * 4);
+
+    fs += phi * dte * 0.32;
+    fluxSets.forEach(function (set) {
+      set.p.visible = state.flux;
+      if (!state.flux) return;
+      for (var i = 0; i < FLUX_N; i++) fluxPos(i / FLUX_N + fs, set.arr, i, set.z);
+      set.p.geometry.attributes.position.needsUpdate = true;
+      set.m.opacity = 0.25 + 0.75 * Math.abs(phi);
+    });
+
+    coils.forEach(function (c) {
+      c.g.position.x = c.base + c.dir * state.ex * 2.2;
+      updCoil(c, phi, dte);
+    });
+
+    placeCamera();
+    renderer.render(scene, camera);
+
+    if (state.labels) {
+      labels.forEach(function (l) {
+        vtmp.copy(l.anchor()).project(camera);
+        l.el.style.left = ((vtmp.x * 0.5 + 0.5) * W).toFixed(1) + 'px';
+        l.el.style.top = ((-vtmp.y * 0.5 + 0.5) * H).toFixed(1) + 'px';
+        l.el.style.opacity = vtmp.z < 1 ? '1' : '0';
+      });
+    }
+    drawScope(phase);
+    requestAnimationFrame(frame);
+  }
+
+  // controls
+  function setMode(m) {
+    state.mode = m;
+    $('tab1').setAttribute('aria-selected', m === 1 ? 'true' : 'false');
+    $('tab2').setAttribute('aria-selected', m === 2 ? 'true' : 'false');
+    $('vsWrap').hidden = m !== 1;
+    rebuild();
+  }
+  $('tab1').addEventListener('click', function () { setMode(1); });
+  $('tab2').addEventListener('click', function () { setMode(2); });
+  $('btnPlay').addEventListener('click', function () {
+    state.paused = !state.paused;
+    this.textContent = state.paused ? 'Reproduzir' : 'Pausar';
+  });
+  $('chkExplode').addEventListener('change', function () { state.exTarget = this.checked ? 1 : 0; });
+  $('chkLabels').addEventListener('change', function () { state.labels = this.checked; applyLabelVisibility(); });
+  $('chkFlux').addEventListener('change', function () { state.flux = this.checked; });
+  $('chkAuto').addEventListener('change', function () {
+    if (this.checked) { state.auto = true; }
+    else { cam.theta += 0.4 * Math.sin(clock * 0.35); state.auto = false; }
+  });
+  $('spd').addEventListener('input', function () { state.speed = +this.value; });
+  $('vs').addEventListener('input', function () {
+    state.vs = +this.value;
+    $('vsOut').textContent = state.vs + ' V';
+    rebuild();
+  });
+
+  $('btnPlay').textContent = state.paused ? 'Reproduzir' : 'Pausar';
+  $('chkAuto').checked = state.auto;
+  if (window.ResizeObserver) new ResizeObserver(resize).observe(stage);
+  window.addEventListener('resize', resize);
+  resize();
+  rebuild();
+  requestAnimationFrame(frame);
+})();
+</script>
+
+</body></html>
